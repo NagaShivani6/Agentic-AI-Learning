@@ -4,7 +4,7 @@ from typing import Annotated, TypedDict
 
 from dotenv import load_dotenv
 import requests
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_groq import ChatGroq
 from langgraph.checkpoint.memory import MemorySaver
@@ -103,19 +103,10 @@ def weather_tool(city: str) -> str:
     probabilities = hourly["precipitation_probability"]
     current_time = datetime.fromisoformat(current["time"])
     upcoming_probabilities = [
-        chance
+        f"{time}: {chance}%"
         for time, chance in zip(hourly_times, probabilities)
         if datetime.fromisoformat(time) >= current_time and chance is not None
-    ]
-    next_six_hours = upcoming_probabilities[:6]
-    max_rain_chance = max(next_six_hours, default=None)
-    rain_advice = (
-        "Carry an umbrella; rain chance is significant."
-        if max_rain_chance is not None and max_rain_chance >= 40
-        else "Rain chance is low over the next six hours."
-        if max_rain_chance is not None
-        else "Rain probability is unavailable."
-    )
+    ][:6]
 
     place_name = ", ".join(
         value
@@ -129,10 +120,8 @@ def weather_tool(city: str) -> str:
     description = weather_descriptions.get(
         current["weather_code"], "unknown conditions"
     )
-    rain_chance_text = (
-        f"{max_rain_chance}%"
-        if max_rain_chance is not None
-        else "unavailable"
+    rain_forecast = (
+        ", ".join(upcoming_probabilities) if upcoming_probabilities else "unavailable"
     )
     return (
         f"Weather for {place_name} at {current['time']} local time "
@@ -142,9 +131,8 @@ def weather_tool(city: str) -> str:
         f"{current['relative_humidity_2m']}%, wind "
         f"{current['wind_speed_10m']} km/h. Current precipitation: "
         f"{current['precipitation']} mm (rain: {current['rain']} mm, "
-        f"showers: {current['showers']} mm). Highest precipitation "
-        f"probability during the next six hours: {rain_chance_text}. "
-        f"{rain_advice}"
+        f"showers: {current['showers']} mm). Hourly precipitation "
+        f"probability for the next six hours: {rain_forecast}."
     )
 
 
@@ -161,7 +149,7 @@ def llm_node(state: AgentState) -> dict:
 def build_agent_graph():
     graph = StateGraph(AgentState)
     graph.add_node("llm_node", llm_node)
-    graph.add_node("tool_node", ToolNode([weather_tool]))
+    graph.add_node("tool_node", ToolNode([weather_tool], handle_tool_errors=True))
     graph.set_entry_point("llm_node")
     graph.add_conditional_edges("llm_node", tools_condition, {"tools": "tool_node", END: END})
     graph.add_edge("tool_node", "llm_node")
@@ -176,6 +164,14 @@ if __name__ == "__main__":
     for step in app.stream(
         {
             "messages": [
+                SystemMessage(
+                    content=(
+                        "Use the weather tool's reported observations and hourly "
+                        "precipitation probabilities to answer the user's question. "
+                        "Make recommendations yourself from the data; do not claim "
+                        "the tool made the decision."
+                    )
+                ),
                 HumanMessage(
                     content="What is the weather in Hyderabad and should I carry an umbrella?"
                 )

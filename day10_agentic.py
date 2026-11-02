@@ -9,7 +9,6 @@ from langchain_groq import ChatGroq
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 from langchain_community.utilities import RequestsWrapper
-from duckduckgo_search import DDGS
 from langchain_core.tools import tool
 
 

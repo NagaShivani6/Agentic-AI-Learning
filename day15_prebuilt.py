@@ -15,10 +15,6 @@ from langchain.agents import create_agent
 load_dotenv()
 
 
-class AgentState(TypedDict):
-    messages: Annotated[list, operator.add]
-
-
 llm = ChatGroq(
     model="openai/gpt-oss-120b",
     temperature=0,

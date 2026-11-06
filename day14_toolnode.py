@@ -20,7 +20,7 @@ class AgentState(TypedDict):
 
 
 llm = ChatGroq(
-    model="qwen/qwen3.8-27b",
+    model="openai/gpt-oss-120b",
     temperature=0,
     max_tokens=512,
 )
@@ -137,7 +137,6 @@ def weather_tool(city: str) -> str:
 
 
 
-
 llm_with_tools = llm.bind_tools([weather_tool])
 
 
@@ -186,4 +185,4 @@ if __name__ == "__main__":
             and last_message.content
             and not last_message.tool_calls
         ):
-            print(last_message.content.encode("ascii", "backslashreplace").decode("ascii"))
+            print(last_message.content)

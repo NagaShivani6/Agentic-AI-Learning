@@ -5,3 +5,4 @@ langchain-groq
 langgraph
 python-dotenv
 requests
+langgraph-supervisor

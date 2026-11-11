@@ -1,7 +1,5 @@
 # 1. Define get_weather and send_email with @tool (clear descriptions!)
-import operator
 from datetime import datetime
-from typing import Annotated, TypedDict
 
 from dotenv import load_dotenv
 import requests
@@ -9,8 +7,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from langchain_groq import ChatGroq
 from langgraph.checkpoint.memory import MemorySaver
-from langgraph.graph import END, StateGraph
-from langgraph.prebuilt import ToolNode, tools_condition
+from langchain_core.messages import ToolMessage
 from langchain.agents import create_agent
 
 
@@ -174,6 +171,10 @@ if __name__ == "__main__":
         if "tools" in state.next:
             last_message = state.values["messages"][-1]
             tool_calls = getattr(last_message, "tool_calls", [])
+            if tool_calls and all(tc["name"] == "get_weather" for tc in tool_calls):
+                print("Automatically running the weather tool.")
+                agent.invoke(None, config)
+                continue
             print("Agent paused before running these tool calls:")
             for tool_call in tool_calls:
                 print(f"- {tool_call['name']}: {tool_call['args']}")
@@ -182,11 +183,22 @@ if __name__ == "__main__":
             if user_input == "a":
                 agent.invoke(None, config)
                 continue
+
             if user_input == "r":
-                print("Rejected. No pending tools were run.")
-                break
-            print("Invalid input. Please enter 'a' to approve or 'r' to reject.")
-            continue
+                agent.update_state(
+                    config,
+                    {"messages": [
+                        ToolMessage(
+                            content="The user rejected this action. Do not retry it.",
+                            tool_call_id=tc["id"],
+                            name=tc["name"],
+                        )
+                        for tc in tool_calls
+                    ]},
+                    as_node="tools",
+                )
+                agent.invoke(None, config)  # the model now replies to the rejection
+                continue
 
         final_message = next(
             (

@@ -1,6 +1,8 @@
 # 1. Define get_weather and send_email with @tool (clear descriptions!)
 from datetime import datetime
 from uuid import uuid4
+import ast
+import operator
 
 from dotenv import load_dotenv
 import requests
@@ -146,7 +148,31 @@ research_agent = create_agent(
 def math_tool(expression: str) -> str:
     """A tool for performing mathematical calculations."""
     try:
-        result = eval(expression)
+        binary_operators = {
+            ast.Add: operator.add,
+            ast.Sub: operator.sub,
+            ast.Mult: operator.mul,
+            ast.Div: operator.truediv,
+            ast.FloorDiv: operator.floordiv,
+            ast.Mod: operator.mod,
+            ast.Pow: operator.pow,
+        }
+        unary_operators = {ast.UAdd: operator.pos, ast.USub: operator.neg}
+
+        def evaluate(node):
+            if isinstance(node, ast.Expression):
+                return evaluate(node.body)
+            if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+                return node.value
+            if isinstance(node, ast.BinOp) and type(node.op) in binary_operators:
+                return binary_operators[type(node.op)](
+                    evaluate(node.left), evaluate(node.right)
+                )
+            if isinstance(node, ast.UnaryOp) and type(node.op) in unary_operators:
+                return unary_operators[type(node.op)](evaluate(node.operand))
+            raise ValueError("Unsupported mathematical expression")
+
+        result = evaluate(ast.parse(expression, mode="eval"))
         return str(result)
     except Exception as e:
         return f"Error: {str(e)}"
@@ -196,7 +222,11 @@ if __name__ == "__main__":
     ):
         for node, state_delta in update.items():
             print(f"\n[{node}]")
+            seen =set()
             for message in state_delta.get("messages", []):
+                if message.id in seen:
+                    continue
+                seen.add(message.id)
                 tool_calls = getattr(message, "tool_calls", [])
                 if tool_calls:
                     for tool_call in tool_calls:

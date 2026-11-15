@@ -10,6 +10,7 @@ from langchain_core.tools import tool
 from langchain_groq import ChatGroq
 from langgraph.checkpoint.memory import MemorySaver
 from langchain.agents import create_agent
+from langgraph_supervisor import create_supervisor
 
 
 load_dotenv()
@@ -186,67 +187,54 @@ math_agent = create_agent(
     name="math_agent",
 )
 
-@tool
-def ask_research_agent(task: str) -> str:
-    """Delegate a weather or factual-research request to the research specialist.
+# The supervisor sees the shared message history and routes work to an agent.
 
-    Use this tool when the user asks about weather, current conditions, forecasts,
-    locations, or general factual information that should be answered by the
-    research agent. Pass only the research question as a single string. The
-    research agent will determine whether it needs to call the weather tool and
-    return the final answer for that research-only request.
-    """
-    try:
-        result = research_agent.invoke({"messages": [HumanMessage(content=task)]})
-        return result["messages"][-1].content
-    except Exception as e:
-        return f"The research agent encountered an error: {str(e)}"
-
-@tool
-def ask_math_agent(task: str) -> str:
-    """Delegate a math or arithmetic request to the arithmetic specialist.
-
-    Use this tool for calculations such as addition, subtraction, multiplication,
-    division, percentages, powers, modulo, or any other numeric expression. Pass
-    a clear arithmetic task or expression as a string. The math agent will
-    evaluate the calculation and return only the result for that calculation.
-    """
-    try:
-        result = math_agent.invoke({"messages": [HumanMessage(content=task)]})
-        return result["messages"][-1].content
-    except Exception as e:
-        return f"The math agent encountered an error: {str(e)}"
-
-agent = create_agent(
-    llm,
-    tools=[ask_research_agent, ask_math_agent],
-    system_prompt=(
-        "You are a generalist agent. You can handle both weather/factual-research "
-        "and arithmetic tasks. Use ask_research_agent for weather requests and ask_math_agent "
-        "for calculations. If the request involves both, delegate to the appropriate "
-        "specialist agent. Return only the relevant results."
+main_agent = create_supervisor(
+    agents=[research_agent, math_agent],
+    model=llm,
+    prompt=(
+        "You are a dispatcher, not a specialist. Inspect the latest user request. "
+        "For a calculation, delegate that part to math_agent exactly once; never "
+        "calculate it yourself. For weather or factual research, delegate that part "
+        "to research_agent exactly once; never answer it yourself. If both are "
+        "requested, call each relevant specialist once, in either order. Do not send "
+        "the same task to an agent again after it has replied. After all required "
+        "specialists have replied, combine only their findings into one concise "
+        "answer and stop. Do not treat an agent's handoff-back message as a new "
+        "user request."
     ),
-    checkpointer=MemorySaver(),
-    name="general_agent",
-)
+    output_mode="last_message",
+).compile(checkpointer=MemorySaver())
 
 if __name__ == "__main__":
     thread_id = str(uuid4())
     print(f"Thread: {thread_id}")
-    seen = set()
-
-    for update in agent.stream(
-        {"messages": [HumanMessage(content="what is 100 divided by 4?")]},
-        {"configurable": {"thread_id": thread_id}, "recursion_limit": 12},
+    for update in main_agent.stream(
+        {"messages": [HumanMessage(content="What’s the weather in Mumbai, and what is 100 divided by 4?")]},
+        {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": 12,
+        },
         stream_mode="updates",
     ):
         for node, state_delta in update.items():
             print(f"\n[{node}]")
-            for message in state_delta.get("messages", []):
-                if message.id in seen:
-                    continue
-                seen.add(message.id)
-                for tool_call in getattr(message, "tool_calls", []):
-                    print(f"Routes to {tool_call['name']}: {tool_call['args']}")
-                if message.content:
-                    print(message.content)
+            seen = set()
+
+            for update in main_agent.stream(
+                {"messages": [HumanMessage(content="What's the weather in Mumbai, and what is 100 divided by 4?")]},
+                {"configurable": {"thread_id": thread_id}, "recursion_limit": 12},
+                stream_mode="updates",
+            ):
+                for node, state_delta in update.items():
+                    print(f"\n[{node}]")
+                    for message in state_delta.get("messages", []):
+                        if message.id in seen:      # already printed, skip it
+                            continue
+                        seen.add(message.id)
+
+                        tool_calls = getattr(message, "tool_calls", [])
+                        for tool_call in tool_calls:
+                            print(f"Routes to {tool_call['name']}: {tool_call['args']}")
+                        if message.content:
+                            print(message.content)

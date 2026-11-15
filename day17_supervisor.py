@@ -1,4 +1,3 @@
-# 1. Define get_weather and send_email with @tool (clear descriptions!)
 from datetime import datetime
 from uuid import uuid4
 import ast
@@ -212,29 +211,20 @@ main_agent = create_supervisor(
 if __name__ == "__main__":
     thread_id = str(uuid4())
     print(f"Thread: {thread_id}")
+    seen = set()
+
     for update in main_agent.stream(
-        {"messages": [HumanMessage(content="What’s the weather in Mumbai, and what is 100 divided by 4?")]},
-        {
-            "configurable": {"thread_id": thread_id},
-            "recursion_limit": 12,
-        },
+        {"messages": [HumanMessage(content="What's the weather in Mumbai, and what is 100 divided by 4?")]},
+        {"configurable": {"thread_id": thread_id}, "recursion_limit": 12},
         stream_mode="updates",
     ):
         for node, state_delta in update.items():
             print(f"\n[{node}]")
-            seen =set()
             for message in state_delta.get("messages", []):
                 if message.id in seen:
                     continue
                 seen.add(message.id)
-                tool_calls = getattr(message, "tool_calls", [])
-                if tool_calls:
-                    for tool_call in tool_calls:
-                        print(
-                            f"Supervisor routes to "
-                            f"{tool_call['name']}: {tool_call['args']}"
-                        )
+                for tool_call in getattr(message, "tool_calls", []):
+                    print(f"Routes to {tool_call['name']}: {tool_call['args']}")
                 if message.content:
                     print(message.content)
-
-        

@@ -6,3 +6,5 @@ langgraph
 python-dotenv
 requests
 langgraph-supervisor
+sentence-transformers
+faiss-cpu
